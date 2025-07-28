@@ -22,7 +22,7 @@ A play-to-earn Web3 game built on Base blockchain where players can earn real SL
 
 1. Clone the repository:
 \`\`\`bash
-git clone https://github.com/your-username/slerf-earning-game.git
+git clone https://github.com/Boomchainlab/slerf-earning-game.git
 cd slerf-earning-game
 \`\`\`
 
