@@ -13,27 +13,31 @@ const leaderboardData = [
 ]
 
 export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url)
-  const timeFilter = searchParams.get("timeFilter") || "all"
-  const limit = Number.parseInt(searchParams.get("limit") || "50")
-
   try {
-    // In production, filter by timeFilter and apply proper database queries
-    const sortedData = leaderboardData
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
-      .map((entry, index) => ({
-        ...entry,
-        rank: index + 1,
-      }))
+    // Mock leaderboard data
+    const leaderboard = [
+      {
+        rank: 1,
+        address: "0x1234567890123456789012345678901234567890",
+        score: 4850,
+        games: 45,
+        tokens: 485.0,
+        lastPlayed: Date.now() - 86400000,
+      },
+      {
+        rank: 2,
+        address: "0x2345678901234567890123456789012345678901",
+        score: 4200,
+        games: 38,
+        tokens: 420.0,
+        lastPlayed: Date.now() - 172800000,
+      },
+      // Add more mock data as needed
+    ]
 
-    return NextResponse.json({
-      success: true,
-      data: sortedData,
-      total: leaderboardData.length,
-    })
+    return NextResponse.json({ leaderboard })
   } catch (error) {
-    return NextResponse.json({ success: false, error: "Failed to fetch leaderboard" }, { status: 500 })
+    return NextResponse.json({ success: false, message: "Failed to fetch leaderboard" }, { status: 500 })
   }
 }
 

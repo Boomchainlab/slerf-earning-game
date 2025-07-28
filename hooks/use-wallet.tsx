@@ -1,8 +1,7 @@
 "use client"
 
-import type React from "react"
-
 import { useState, useEffect, createContext, useContext } from "react"
+import type { ReactNode } from "react"
 
 interface WalletContextType {
   isConnected: boolean
@@ -16,7 +15,6 @@ const WalletContext = createContext<WalletContextType | null>(null)
 export function useWallet() {
   const context = useContext(WalletContext)
   if (!context) {
-    // Return default values when not in provider
     return {
       isConnected: false,
       address: null,
@@ -27,12 +25,11 @@ export function useWallet() {
   return context
 }
 
-export function WalletProvider({ children }: { children: React.ReactNode }) {
+export function WalletProvider({ children }: { children: ReactNode }) {
   const [isConnected, setIsConnected] = useState(false)
   const [address, setAddress] = useState<string | null>(null)
 
   useEffect(() => {
-    // Check if wallet was previously connected
     const savedAddress = localStorage.getItem("walletAddress")
     const savedConnection = localStorage.getItem("walletConnected")
 
@@ -44,12 +41,10 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
   const connect = async () => {
     try {
-      // Simulate wallet connection
       const mockAddress = `0x${Math.random().toString(16).substr(2, 40)}`
       setAddress(mockAddress)
       setIsConnected(true)
 
-      // Save to localStorage
       localStorage.setItem("walletAddress", mockAddress)
       localStorage.setItem("walletConnected", "true")
     } catch (error) {
@@ -61,7 +56,6 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setAddress(null)
     setIsConnected(false)
 
-    // Clear localStorage
     localStorage.removeItem("walletAddress")
     localStorage.removeItem("walletConnected")
   }

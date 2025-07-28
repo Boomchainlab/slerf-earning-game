@@ -1,25 +1,20 @@
 "use client"
 
-import { useWallet } from "@/hooks/use-wallet"
+import { useAccount, useConnect, useDisconnect } from "wagmi"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { Wallet, LogOut, Copy, Check } from "lucide-react"
-import { useState } from "react"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Wallet, LogOut, Copy } from "lucide-react"
+import { toast } from "sonner"
 
 export function WalletConnect() {
-  const { address, isConnected, connect, disconnect } = useWallet()
-  const [copied, setCopied] = useState(false)
-  const [isConnecting, setIsConnecting] = useState(false)
+  const { address, isConnected } = useAccount()
+  const { connect, connectors } = useConnect()
+  const { disconnect } = useDisconnect()
 
-  const copyAddress = async () => {
+  const copyAddress = () => {
     if (address) {
-      try {
-        await navigator.clipboard.writeText(address)
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
-      } catch (err) {
-        console.log("Copy failed:", err)
-      }
+      navigator.clipboard.writeText(address)
+      toast.success("Address copied to clipboard")
     }
   }
 
@@ -27,55 +22,48 @@ export function WalletConnect() {
     return `${addr.slice(0, 6)}...${addr.slice(-4)}`
   }
 
-  const handleConnect = async () => {
-    setIsConnecting(true)
-    try {
-      await connect()
-    } finally {
-      setIsConnecting(false)
-    }
-  }
-
   if (isConnected && address) {
     return (
-      <Card className="bg-white/10 backdrop-blur-sm border-white/20">
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
-                <div className="w-3 h-3 bg-white rounded-full"></div>
-              </div>
-              <div>
-                <div className="text-white font-medium">{formatAddress(address)}</div>
-                <div className="text-white/70 text-sm">Base Network</div>
-              </div>
-            </div>
-            <div className="flex space-x-2">
-              <Button onClick={copyAddress} size="sm" variant="ghost" className="text-white hover:bg-white/20">
-                {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-              </Button>
-              <Button onClick={disconnect} size="sm" variant="ghost" className="text-white hover:bg-white/20">
-                <LogOut className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" className="bg-white/10 border-white/20 text-white hover:bg-white/20">
+            <Wallet className="h-4 w-4 mr-2" />
+            {formatAddress(address)}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="bg-gray-900 border-gray-700">
+          <DropdownMenuItem onClick={copyAddress} className="text-white hover:bg-gray-800">
+            <Copy className="h-4 w-4 mr-2" />
+            Copy Address
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => disconnect()} className="text-white hover:bg-gray-800">
+            <LogOut className="h-4 w-4 mr-2" />
+            Disconnect
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     )
   }
 
   return (
-    <div className="space-y-3">
-      <Button
-        onClick={handleConnect}
-        disabled={isConnecting}
-        className="bg-white/20 hover:bg-white/30 text-white border-white/30 w-full justify-start"
-        variant="outline"
-      >
-        <Wallet className="mr-2 h-4 w-4" />
-        {isConnecting ? "Connecting..." : "Connect Wallet"}
-      </Button>
-      <p className="text-white/60 text-xs text-center">Demo wallet - simulates Web3 functionality</p>
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700">
+          <Wallet className="h-4 w-4 mr-2" />
+          Connect Wallet
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="bg-gray-900 border-gray-700">
+        {connectors.map((connector) => (
+          <DropdownMenuItem
+            key={connector.uid}
+            onClick={() => connect({ connector })}
+            className="text-white hover:bg-gray-800"
+          >
+            {connector.name}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

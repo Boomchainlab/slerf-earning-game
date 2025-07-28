@@ -1,474 +1,397 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
-import { motion, AnimatePresence } from "framer-motion"
-import { useWallet } from "@/hooks/use-wallet"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useSLERFContracts } from "@/hooks/use-slerf-contracts"
+import { useAccount } from "wagmi"
 import { WalletConnect } from "@/components/wallet-connect"
-import { ArrowLeft, Pause, Play, RotateCcw } from "lucide-react"
+import { Play, Pause, RotateCcw, Home, Trophy, Coins } from "lucide-react"
+import { toast } from "sonner"
 import Link from "next/link"
 
 interface GameObject {
-  id: number
   x: number
   y: number
-  type: "coin" | "obstacle" | "powerup"
-  collected?: boolean
-}
-
-interface Player {
-  x: number
-  y: number
-  velocityY: number
-  isJumping: boolean
+  width: number
+  height: number
+  type: "obstacle" | "coin"
 }
 
 export default function PlayPage() {
-  const { isConnected } = useWallet()
   const router = useRouter()
+  const { isConnected } = useAccount()
+  const { submitScore, isPending, isConfirmed, playerStats, refetchPlayerStats } = useSLERFContracts()
+
+  const canvasRef = useRef<HTMLCanvasElement>(null)
   const gameLoopRef = useRef<number>()
-  const [showWalletModal, setShowWalletModal] = useState(false)
 
   const [gameState, setGameState] = useState<"menu" | "playing" | "paused" | "gameOver">("menu")
   const [score, setScore] = useState(0)
-  const [highScore, setHighScore] = useState(0)
-  const [timeLeft, setTimeLeft] = useState(60)
-  const [player, setPlayer] = useState<Player>({ x: 100, y: 300, velocityY: 0, isJumping: false })
+  const [coins, setCoins] = useState(0)
+  const [player, setPlayer] = useState({ x: 50, y: 200, velocityY: 0, isJumping: false })
   const [objects, setObjects] = useState<GameObject[]>([])
-  const [keys, setKeys] = useState<{ [key: string]: boolean }>({})
+  const [gameSpeed, setGameSpeed] = useState(2)
 
-  // Show wallet modal if not connected
-  useEffect(() => {
-    if (!isConnected) {
-      setShowWalletModal(true)
-    }
-  }, [isConnected])
+  const CANVAS_WIDTH = 800
+  const CANVAS_HEIGHT = 400
+  const PLAYER_SIZE = 30
+  const GRAVITY = 0.8
+  const JUMP_FORCE = -15
+  const GROUND_Y = CANVAS_HEIGHT - 50
 
-  // Keyboard controls
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      setKeys((prev) => ({ ...prev, [e.key.toLowerCase()]: true }))
-    }
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      setKeys((prev) => ({ ...prev, [e.key.toLowerCase()]: false }))
-    }
-
-    window.addEventListener("keydown", handleKeyDown)
-    window.addEventListener("keyup", handleKeyUp)
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown)
-      window.removeEventListener("keyup", handleKeyUp)
-    }
-  }, [])
-
-  // Game logic
-  const jump = useCallback(() => {
-    if (!player.isJumping) {
-      setPlayer((prev) => ({ ...prev, velocityY: -15, isJumping: true }))
-    }
-  }, [player.isJumping])
-
-  const spawnObject = useCallback(() => {
-    const types: GameObject["type"][] = ["coin", "coin", "coin", "obstacle", "powerup"]
-    const type = types[Math.floor(Math.random() * types.length)]
-
-    const newObject: GameObject = {
-      id: Date.now() + Math.random(),
-      x: 800,
-      y: type === "obstacle" ? 350 : Math.random() * 200 + 150,
-      type,
-      collected: false,
-    }
-
-    setObjects((prev) => [...prev, newObject])
+  // Initialize game
+  const initGame = useCallback(() => {
+    setScore(0)
+    setCoins(0)
+    setPlayer({ x: 50, y: GROUND_Y - PLAYER_SIZE, velocityY: 0, isJumping: false })
+    setObjects([])
+    setGameSpeed(2)
   }, [])
 
   // Game loop
-  useEffect(() => {
+  const gameLoop = useCallback(() => {
     if (gameState !== "playing") return
 
-    const gameLoop = () => {
-      // Update player physics
-      setPlayer((prev) => {
-        let newY = prev.y + prev.velocityY
-        let newVelocityY = prev.velocityY + 0.8 // gravity
-        let newIsJumping = prev.isJumping
+    const canvas = canvasRef.current
+    if (!canvas) return
 
-        // Ground collision
-        if (newY >= 300) {
-          newY = 300
-          newVelocityY = 0
-          newIsJumping = false
-        }
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
 
-        // Handle jump input
-        if ((keys[" "] || keys["arrowup"] || keys["w"]) && !prev.isJumping) {
-          newVelocityY = -15
-          newIsJumping = true
-        }
+    // Clear canvas
+    ctx.fillStyle = "#1e1b4b"
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
 
-        // Handle left/right movement
-        let newX = prev.x
-        if (keys["arrowleft"] || keys["a"]) {
-          newX = Math.max(50, prev.x - 5)
-        }
-        if (keys["arrowright"] || keys["d"]) {
-          newX = Math.min(750, prev.x + 5)
-        }
+    // Draw ground
+    ctx.fillStyle = "#22c55e"
+    ctx.fillRect(0, GROUND_Y, CANVAS_WIDTH, 50)
 
-        return {
-          x: newX,
-          y: newY,
-          velocityY: newVelocityY,
-          isJumping: newIsJumping,
-        }
-      })
+    // Update player physics
+    setPlayer((prev) => {
+      let newY = prev.y + prev.velocityY
+      let newVelocityY = prev.velocityY + GRAVITY
+      let isJumping = prev.isJumping
 
-      // Update objects
-      setObjects((prev) => {
-        return prev.map((obj) => ({ ...obj, x: obj.x - 5 })).filter((obj) => obj.x > -50)
-      })
+      // Ground collision
+      if (newY >= GROUND_Y - PLAYER_SIZE) {
+        newY = GROUND_Y - PLAYER_SIZE
+        newVelocityY = 0
+        isJumping = false
+      }
 
-      // Check collisions
-      setObjects((prev) => {
-        let newScore = score
-        return prev.map((obj) => {
-          if (obj.collected) return obj
+      return { ...prev, y: newY, velocityY: newVelocityY, isJumping }
+    })
 
-          const distance = Math.sqrt(Math.pow(player.x - obj.x, 2) + Math.pow(player.y - obj.y, 2))
+    // Draw player (simple rectangle for now)
+    ctx.fillStyle = "#fbbf24"
+    ctx.fillRect(player.x, player.y, PLAYER_SIZE, PLAYER_SIZE)
 
-          if (distance < 40) {
-            if (obj.type === "coin") {
-              newScore += 10
-              setScore(newScore)
-              return { ...obj, collected: true }
-            } else if (obj.type === "powerup") {
-              newScore += 50
-              setScore(newScore)
-              return { ...obj, collected: true }
-            } else if (obj.type === "obstacle") {
-              setGameState("gameOver")
-              if (newScore > highScore) {
-                setHighScore(newScore)
-                localStorage.setItem("slerfHighScore", newScore.toString())
-              }
-            }
-          }
-          return obj
+    // Update and draw objects
+    setObjects((prev) => {
+      const updated = prev.map((obj) => ({ ...obj, x: obj.x - gameSpeed })).filter((obj) => obj.x + obj.width > 0)
+
+      // Add new objects randomly
+      if (Math.random() < 0.02) {
+        const type = Math.random() < 0.7 ? "obstacle" : "coin"
+        updated.push({
+          x: CANVAS_WIDTH,
+          y: type === "coin" ? GROUND_Y - 80 : GROUND_Y - 40,
+          width: type === "coin" ? 20 : 30,
+          height: type === "coin" ? 20 : 40,
+          type,
         })
+      }
+
+      // Draw objects and check collisions
+      updated.forEach((obj) => {
+        if (obj.type === "obstacle") {
+          ctx.fillStyle = "#ef4444"
+        } else {
+          ctx.fillStyle = "#fbbf24"
+        }
+        ctx.fillRect(obj.x, obj.y, obj.width, obj.height)
+
+        // Collision detection
+        if (
+          player.x < obj.x + obj.width &&
+          player.x + PLAYER_SIZE > obj.x &&
+          player.y < obj.y + obj.height &&
+          player.y + PLAYER_SIZE > obj.y
+        ) {
+          if (obj.type === "obstacle") {
+            setGameState("gameOver")
+          } else if (obj.type === "coin") {
+            setCoins((prev) => prev + 1)
+            setScore((prev) => prev + 10)
+            // Remove collected coin
+            const index = updated.indexOf(obj)
+            if (index > -1) updated.splice(index, 1)
+          }
+        }
       })
 
-      gameLoopRef.current = requestAnimationFrame(gameLoop)
-    }
+      return updated
+    })
+
+    // Update score and speed
+    setScore((prev) => prev + 1)
+    setGameSpeed((prev) => Math.min(prev + 0.001, 5))
 
     gameLoopRef.current = requestAnimationFrame(gameLoop)
+  }, [gameState, player, gameSpeed])
+
+  // Handle jump
+  const jump = useCallback(() => {
+    if (gameState === "playing" && !player.isJumping) {
+      setPlayer((prev) => ({
+        ...prev,
+        velocityY: JUMP_FORCE,
+        isJumping: true,
+      }))
+    }
+  }, [gameState, player.isJumping])
+
+  // Keyboard controls
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (e.code === "Space" || e.code === "ArrowUp") {
+        e.preventDefault()
+        jump()
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyPress)
+    return () => window.removeEventListener("keydown", handleKeyPress)
+  }, [jump])
+
+  // Start game loop
+  useEffect(() => {
+    if (gameState === "playing") {
+      gameLoopRef.current = requestAnimationFrame(gameLoop)
+    } else {
+      if (gameLoopRef.current) {
+        cancelAnimationFrame(gameLoopRef.current)
+      }
+    }
 
     return () => {
       if (gameLoopRef.current) {
         cancelAnimationFrame(gameLoopRef.current)
       }
     }
-  }, [gameState, keys, player.x, player.y, player.isJumping, score, highScore])
+  }, [gameState, gameLoop])
 
-  // Spawn objects periodically
-  useEffect(() => {
-    if (gameState !== "playing") return
-
-    const interval = setInterval(spawnObject, 2000)
-    return () => clearInterval(interval)
-  }, [gameState, spawnObject])
-
-  // Timer
-  useEffect(() => {
-    if (gameState !== "playing") return
-
-    const timer = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          setGameState("gameOver")
-          if (score > highScore) {
-            setHighScore(score)
-            localStorage.setItem("slerfHighScore", score.toString())
-          }
-          return 0
-        }
-        return prev - 1
-      })
-    }, 1000)
-
-    return () => clearInterval(timer)
-  }, [gameState, score, highScore])
-
-  // Load high score
-  useEffect(() => {
-    const saved = localStorage.getItem("slerfHighScore")
-    if (saved) {
-      setHighScore(Number.parseInt(saved))
-    }
-  }, [])
-
-  const startGame = () => {
+  // Handle game over
+  const handleGameOver = async () => {
     if (!isConnected) {
-      setShowWalletModal(true)
+      toast.error("Please connect your wallet to submit score")
       return
     }
+
+    try {
+      await submitScore(score)
+      toast.success(`Score submitted! Earned ${(score * 0.1).toFixed(1)} SLERF tokens`)
+      refetchPlayerStats()
+    } catch (error) {
+      toast.error("Failed to submit score")
+      console.error(error)
+    }
+  }
+
+  // Handle confirmed transaction
+  useEffect(() => {
+    if (isConfirmed) {
+      toast.success("Score recorded on blockchain!")
+    }
+  }, [isConfirmed])
+
+  const startGame = () => {
+    initGame()
     setGameState("playing")
-    setScore(0)
-    setTimeLeft(60)
-    setPlayer({ x: 100, y: 300, velocityY: 0, isJumping: false })
-    setObjects([])
+  }
+
+  const pauseGame = () => {
+    setGameState(gameState === "paused" ? "playing" : "paused")
   }
 
   const resetGame = () => {
+    initGame()
     setGameState("menu")
-    setScore(0)
-    setTimeLeft(60)
-    setPlayer({ x: 100, y: 300, velocityY: 0, isJumping: false })
-    setObjects([])
-  }
-
-  const getObjectEmoji = (type: GameObject["type"]) => {
-    switch (type) {
-      case "coin":
-        return "🪙"
-      case "obstacle":
-        return "🌵"
-      case "powerup":
-        return "⭐"
-      default:
-        return "❓"
-    }
   }
 
   return (
-    <div className="min-h-screen game-bg">
-      {/* Wallet Modal */}
-      {showWalletModal && !isConnected && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-white/10 backdrop-blur-sm rounded-3xl p-6 max-w-md w-full"
-          >
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold text-white">Connect Wallet to Play</h2>
-              <Button
-                onClick={() => {
-                  setShowWalletModal(false)
-                  router.push("/")
-                }}
-                variant="ghost"
-                className="text-white hover:bg-white/20"
-              >
-                ✕
-              </Button>
-            </div>
-            <WalletConnect />
-            <p className="text-white/70 text-sm mt-4 text-center">
-              You need to connect your wallet to play and earn SLERF tokens
-            </p>
-          </motion.div>
-        </div>
-      )}
-
+    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
       {/* Header */}
-      <header className="p-6 flex justify-between items-center">
-        <Link href="/">
-          <Button variant="outline" className="bg-white/20 border-white text-white hover:bg-white/30">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Home
-          </Button>
-        </Link>
-
-        <div className="flex items-center space-x-6 text-white">
-          <div className="text-center">
-            <div className="text-sm opacity-80">Score</div>
-            <div className="text-2xl font-bold">{score.toLocaleString()}</div>
-          </div>
-          <div className="text-center">
-            <div className="text-sm opacity-80">High Score</div>
-            <div className="text-xl font-bold text-yellow-300">{highScore.toLocaleString()}</div>
-          </div>
-          <div className="text-center">
-            <div className="text-sm opacity-80">Time</div>
-            <div className="text-xl font-bold">{timeLeft}s</div>
-          </div>
-        </div>
-
-        <div className="flex space-x-2">
-          {gameState === "playing" && (
-            <Button onClick={() => setGameState("paused")} className="bg-yellow-500 hover:bg-yellow-600 text-black">
-              <Pause className="h-4 w-4" />
-            </Button>
-          )}
-          <Button
-            onClick={resetGame}
-            variant="outline"
-            className="bg-white/20 border-white text-white hover:bg-white/30"
-          >
-            <RotateCcw className="h-4 w-4" />
-          </Button>
+      <header className="border-b border-white/10 backdrop-blur-sm">
+        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-2 text-white hover:text-gray-300">
+            <Home className="h-5 w-5" />
+            <span className="font-semibold">SLERF Game</span>
+          </Link>
+          <WalletConnect />
         </div>
       </header>
 
-      {/* Game Area */}
-      <div className="container mx-auto px-6">
-        <Card className="bg-gradient-to-b from-sky-400 to-green-400 border-0 cartoon-shadow">
-          <CardContent className="p-0">
-            <div className="relative w-full h-96 overflow-hidden rounded-lg">
-              {/* Ground */}
-              <div className="absolute bottom-0 w-full h-16 bg-green-600"></div>
+      <div className="container mx-auto px-4 py-8">
+        <div className="max-w-4xl mx-auto">
+          {/* Game Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <Card className="bg-white/10 border-white/20 backdrop-blur-sm">
+              <CardContent className="p-4 text-center">
+                <div className="text-2xl font-bold text-white">{score}</div>
+                <div className="text-sm text-gray-400">Score</div>
+              </CardContent>
+            </Card>
+            <Card className="bg-white/10 border-white/20 backdrop-blur-sm">
+              <CardContent className="p-4 text-center">
+                <div className="text-2xl font-bold text-yellow-400">{coins}</div>
+                <div className="text-sm text-gray-400">Coins</div>
+              </CardContent>
+            </Card>
+            <Card className="bg-white/10 border-white/20 backdrop-blur-sm">
+              <CardContent className="p-4 text-center">
+                <div className="text-2xl font-bold text-green-400">{(score * 0.1).toFixed(1)}</div>
+                <div className="text-sm text-gray-400">SLERF Earned</div>
+              </CardContent>
+            </Card>
+            <Card className="bg-white/10 border-white/20 backdrop-blur-sm">
+              <CardContent className="p-4 text-center">
+                <div className="text-2xl font-bold text-purple-400">{playerStats?.highScore || 0}</div>
+                <div className="text-sm text-gray-400">High Score</div>
+              </CardContent>
+            </Card>
+          </div>
 
-              {/* Clouds */}
-              <div className="absolute top-4 left-10 text-4xl opacity-70">☁️</div>
-              <div className="absolute top-8 right-20 text-3xl opacity-50">☁️</div>
-              <div className="absolute top-2 left-1/2 text-5xl opacity-60">☁️</div>
+          {/* Game Canvas */}
+          <Card className="bg-white/10 border-white/20 backdrop-blur-sm mb-6">
+            <CardContent className="p-6">
+              <div className="relative">
+                <canvas
+                  ref={canvasRef}
+                  width={CANVAS_WIDTH}
+                  height={CANVAS_HEIGHT}
+                  className="w-full max-w-full border border-white/20 rounded-lg bg-gradient-to-b from-blue-400 to-blue-600"
+                  onClick={jump}
+                />
 
-              {/* Player */}
-              <motion.div
-                className="absolute text-6xl z-10"
-                style={{
-                  left: player.x - 30,
-                  top: player.y - 30,
-                }}
-                animate={{
-                  rotate: player.isJumping ? -10 : 0,
-                }}
-              >
-                🦥
-              </motion.div>
-
-              {/* Game Objects */}
-              <AnimatePresence>
-                {objects.map((obj) => (
-                  <motion.div
-                    key={obj.id}
-                    className="absolute text-4xl z-5"
-                    style={{
-                      left: obj.x - 20,
-                      top: obj.y - 20,
-                    }}
-                    initial={{ scale: 0, rotate: -180 }}
-                    animate={{
-                      scale: obj.collected ? 0 : 1,
-                      rotate: obj.collected ? 180 : 0,
-                      y: obj.type === "coin" ? [0, -10, 0] : 0,
-                    }}
-                    exit={{ scale: 0, rotate: 180 }}
-                    transition={{
-                      scale: { duration: 0.3 },
-                      y: { duration: 2, repeat: Number.POSITIVE_INFINITY },
-                    }}
-                  >
-                    {getObjectEmoji(obj.type)}
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-
-              {/* Game State Overlays */}
-              <AnimatePresence>
+                {/* Game Overlays */}
                 {gameState === "menu" && (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="absolute inset-0 bg-black/50 flex items-center justify-center"
-                  >
-                    <div className="text-center text-white">
-                      <h2 className="text-4xl font-bold mb-4">SLERF Runner</h2>
-                      <p className="text-lg mb-6">Collect coins and avoid obstacles!</p>
-                      <p className="text-sm mb-6 opacity-80">Use SPACE/W/↑ to jump, A/D/←/→ to move</p>
-                      <Button
-                        onClick={startGame}
-                        size="lg"
-                        className="bg-yellow-500 hover:bg-yellow-600 text-black font-bold px-8 py-4 rounded-full cartoon-shadow"
-                      >
-                        <Play className="mr-2 h-5 w-5" />
-                        {isConnected ? "Start Game" : "Connect Wallet"}
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-lg">
+                    <div className="text-center">
+                      <h2 className="text-3xl font-bold text-white mb-4">SLERF Runner</h2>
+                      <p className="text-gray-300 mb-6">Jump over obstacles and collect coins!</p>
+                      <Button onClick={startGame} size="lg" className="bg-green-500 hover:bg-green-600">
+                        <Play className="h-5 w-5 mr-2" />
+                        Start Game
                       </Button>
                     </div>
-                  </motion.div>
+                  </div>
                 )}
 
                 {gameState === "paused" && (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="absolute inset-0 bg-black/50 flex items-center justify-center"
-                  >
-                    <div className="text-center text-white">
-                      <h2 className="text-3xl font-bold mb-6">Game Paused</h2>
-                      <Button
-                        onClick={() => setGameState("playing")}
-                        size="lg"
-                        className="bg-yellow-500 hover:bg-yellow-600 text-black font-bold px-8 py-4 rounded-full cartoon-shadow"
-                      >
-                        <Play className="mr-2 h-5 w-5" />
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-lg">
+                    <div className="text-center">
+                      <h2 className="text-2xl font-bold text-white mb-4">Game Paused</h2>
+                      <Button onClick={pauseGame} size="lg" className="bg-blue-500 hover:bg-blue-600">
+                        <Play className="h-5 w-5 mr-2" />
                         Resume
                       </Button>
                     </div>
-                  </motion.div>
+                  </div>
                 )}
 
                 {gameState === "gameOver" && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.8 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.8 }}
-                    className="absolute inset-0 bg-black/70 flex items-center justify-center"
-                  >
-                    <div className="text-center text-white bg-white/10 backdrop-blur-sm p-8 rounded-3xl cartoon-shadow">
-                      <h2 className="text-4xl font-bold mb-4">Game Over!</h2>
-                      <div className="text-2xl mb-2">
-                        Final Score: <span className="text-yellow-300 font-bold">{score.toLocaleString()}</span>
-                      </div>
-                      <div className="text-lg mb-6">
-                        SLERF Earned: <span className="text-green-300 font-bold">{(score * 0.1).toFixed(1)}</span>
-                      </div>
-                      {score > highScore && <div className="text-yellow-300 text-lg mb-4">🎉 New High Score! 🎉</div>}
-                      <div className="flex space-x-4 justify-center">
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-lg">
+                    <div className="text-center">
+                      <h2 className="text-2xl font-bold text-white mb-2">Game Over!</h2>
+                      <p className="text-gray-300 mb-4">Final Score: {score}</p>
+                      <p className="text-yellow-400 mb-6">Earned: {(score * 0.1).toFixed(1)} SLERF</p>
+                      <div className="flex gap-4 justify-center">
+                        {isConnected ? (
+                          <Button
+                            onClick={handleGameOver}
+                            disabled={isPending}
+                            className="bg-green-500 hover:bg-green-600"
+                          >
+                            <Coins className="h-4 w-4 mr-2" />
+                            {isPending ? "Submitting..." : "Submit Score"}
+                          </Button>
+                        ) : (
+                          <div className="text-center">
+                            <p className="text-yellow-400 mb-4">Connect wallet to submit score</p>
+                            <WalletConnect />
+                          </div>
+                        )}
                         <Button
-                          onClick={startGame}
-                          size="lg"
-                          className="bg-yellow-500 hover:bg-yellow-600 text-black font-bold px-6 py-3 rounded-full"
+                          onClick={resetGame}
+                          variant="outline"
+                          className="border-white/20 text-white hover:bg-white/10 bg-transparent"
                         >
+                          <RotateCcw className="h-4 w-4 mr-2" />
                           Play Again
                         </Button>
-                        <Link href="/claim">
-                          <Button
-                            size="lg"
-                            className="bg-green-500 hover:bg-green-600 text-white font-bold px-6 py-3 rounded-full"
-                          >
-                            Claim SLERF
-                          </Button>
-                        </Link>
                       </div>
                     </div>
-                  </motion.div>
+                  </div>
                 )}
-              </AnimatePresence>
-            </div>
-          </CardContent>
-        </Card>
+              </div>
+            </CardContent>
+          </Card>
 
-        {/* Mobile Controls */}
-        <div className="mt-6 flex justify-center space-x-4 md:hidden">
-          <Button
-            onTouchStart={jump}
-            className="bg-yellow-500 hover:bg-yellow-600 text-black font-bold px-8 py-4 rounded-full cartoon-shadow text-2xl"
-          >
-            Jump
-          </Button>
-        </div>
+          {/* Game Controls */}
+          <div className="flex justify-center gap-4 mb-6">
+            {gameState === "playing" && (
+              <Button onClick={pauseGame} className="bg-yellow-500 hover:bg-yellow-600">
+                <Pause className="h-4 w-4 mr-2" />
+                Pause
+              </Button>
+            )}
+            <Button
+              onClick={resetGame}
+              variant="outline"
+              className="border-white/20 text-white hover:bg-white/10 bg-transparent"
+            >
+              <RotateCcw className="h-4 w-4 mr-2" />
+              Reset
+            </Button>
+            <Link href="/leaderboard">
+              <Button variant="outline" className="border-white/20 text-white hover:bg-white/10 bg-transparent">
+                <Trophy className="h-4 w-4 mr-2" />
+                Leaderboard
+              </Button>
+            </Link>
+          </div>
 
-        {/* Instructions */}
-        <div className="mt-6 text-center text-white/80">
-          <p className="text-sm">Desktop: Use SPACE/W/↑ to jump, A/D/←/→ to move | Mobile: Tap Jump button</p>
+          {/* Instructions */}
+          <Card className="bg-white/10 border-white/20 backdrop-blur-sm">
+            <CardHeader>
+              <CardTitle className="text-white">How to Play</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid md:grid-cols-2 gap-4 text-gray-300">
+                <div>
+                  <h4 className="font-semibold text-white mb-2">Controls:</h4>
+                  <ul className="space-y-1">
+                    <li>• Press SPACE or ↑ to jump</li>
+                    <li>• Click on the game area to jump</li>
+                    <li>• Avoid red obstacles</li>
+                    <li>• Collect yellow coins</li>
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-white mb-2">Scoring:</h4>
+                  <ul className="space-y-1">
+                    <li>• +1 point per frame survived</li>
+                    <li>• +10 points per coin collected</li>
+                    <li>• Earn 0.1 SLERF per point</li>
+                    <li>• Submit score to claim tokens</li>
+                  </ul>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>
